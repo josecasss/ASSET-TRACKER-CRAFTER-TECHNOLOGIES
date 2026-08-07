@@ -1,0 +1,71 @@
+datasource db {
+  provider = "sqlite" // "postgresql" in production
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           Int    @id @default(autoincrement())
+  username     String @unique
+  passwordHash String @map("password_hash")
+  role         String // ASSET_VIEWER | ASSET_WORKER | ASSET_ADMIN
+  companyCode  String @map("company_code")
+
+  @@map("USERS")
+}
+
+// Simulates the external ERP asset master (section 1.1 / 5.2).
+model AssetMaster {
+  assetTagNumber String @id @map("asset_tag_number")
+  companyCode    String @map("company_code")
+  description    String
+  costCenter     String @map("cost_center")
+
+  @@index([companyCode])
+  @@index([costCenter])
+  @@map("ASSET_MASTER")
+}
+
+model AssetStatusCode {
+  statusId   String  @id @map("status_id")
+  statusText String  @map("status_text")
+  active     Boolean @default(true)
+
+  trackers AssetStatusTracker[]
+  history  AssetStatusHistory[]
+
+  @@map("ASSET_STATUS_CODES")
+}
+
+model AssetStatusTracker {
+  assetTagNumber  String   @id @map("asset_tag_number")
+  companyCode     String   @map("company_code")
+  mainAssetNumber String   @map("main_asset_number")
+  assetSubNumber  String   @map("asset_sub_number")
+  statusId        String   @map("status_id")
+  lastCountedDate DateTime @map("last_counted_date")
+  updatedByUser   String   @map("updated_by_user")
+
+  statusCode AssetStatusCode      @relation(fields: [statusId], references: [statusId])
+  history    AssetStatusHistory[]
+
+  @@index([companyCode])
+  @@map("ASSET_STATUS_TRACKER")
+}
+
+model AssetStatusHistory {
+  id             Int      @id @default(autoincrement())
+  assetTagNumber String   @map("asset_tag_number")
+  statusId       String   @map("status_id")
+  changedAt      DateTime @default(now()) @map("changed_at")
+  changedBy      String   @map("changed_by")
+
+  tracker    AssetStatusTracker @relation(fields: [assetTagNumber], references: [assetTagNumber])
+  statusCode AssetStatusCode    @relation(fields: [statusId], references: [statusId])
+
+  @@index([assetTagNumber])
+  @@map("ASSET_STATUS_HISTORY")
+}
