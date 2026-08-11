@@ -69,3 +69,13 @@ model AssetStatusHistory {
   @@index([assetTagNumber])
   @@map("ASSET_STATUS_HISTORY")
 }
+
+model AssetCount {
+  id             Int      @id @default(autoincrement())
+  assetTagNumber String   @map("asset_tag_number")
+  countedAt      DateTime @default(now()) @map("counted_at")
+  countedBy      String   @map("counted_by")
+
+  @@index([assetTagNumber])
+  @@map("ASSET_COUNT")
+}
