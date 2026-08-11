@@ -7,6 +7,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+generator erd {
+  provider = "prisma-erd-generator"
+  output   = "../docs/ERD.md"
+}
+
 model User {
   id           Int    @id @default(autoincrement())
   username     String @unique
@@ -17,12 +22,15 @@ model User {
   @@map("USERS")
 }
 
-// Simulates the external ERP asset master (section 1.1 / 5.2).
 model AssetMaster {
-  assetTagNumber String @id @map("asset_tag_number")
-  companyCode    String @map("company_code")
-  description    String
-  costCenter     String @map("cost_center")
+  assetTagNumber  String @id @map("asset_tag_number")
+  companyCode     String @map("company_code")
+  mainAssetNumber String @map("main_asset_number")
+  assetSubNumber  String @map("asset_sub_number")
+  description     String
+  costCenter      String @map("cost_center")
+
+  tracker AssetStatusTracker?
 
   @@index([companyCode])
   @@index([costCenter])
@@ -49,6 +57,7 @@ model AssetStatusTracker {
   lastCountedDate DateTime @map("last_counted_date")
   updatedByUser   String   @map("updated_by_user")
 
+  master     AssetMaster          @relation(fields: [assetTagNumber], references: [assetTagNumber])
   statusCode AssetStatusCode      @relation(fields: [statusId], references: [statusId])
   history    AssetStatusHistory[]
 
@@ -68,14 +77,4 @@ model AssetStatusHistory {
 
   @@index([assetTagNumber])
   @@map("ASSET_STATUS_HISTORY")
-}
-
-model AssetCount {
-  id             Int      @id @default(autoincrement())
-  assetTagNumber String   @map("asset_tag_number")
-  countedAt      DateTime @default(now()) @map("counted_at")
-  countedBy      String   @map("counted_by")
-
-  @@index([assetTagNumber])
-  @@map("ASSET_COUNT")
 }
