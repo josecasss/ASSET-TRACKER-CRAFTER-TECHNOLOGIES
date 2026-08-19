@@ -80,17 +80,26 @@ async function main() {
     });
   }
 
-  const passwordHash = await bcrypt.hash('Admin123!', 10);
-  await prisma.user.upsert({
-    where: { username: 'admin' },
-    update: {},
-    create: {
-      username: 'admin',
-      passwordHash,
-      role: 'ASSET_ADMIN',
-      companyCode: 'COMP',
-    },
-  });
+  const USERS = [
+    { username: 'admin', password: 'Admin123!', role: 'ASSET_ADMIN', companyCode: 'COMP' },
+    { username: 'worker', password: 'Worker123!', role: 'ASSET_WORKER', companyCode: 'COMP' },
+    { username: 'viewer', password: 'Viewer123!', role: 'ASSET_VIEWER', companyCode: 'COMP' },
+    { username: 'othr_admin', password: 'Othr123!', role: 'ASSET_ADMIN', companyCode: 'OTHR' },
+  ];
+
+  for (const user of USERS) {
+    const passwordHash = await bcrypt.hash(user.password, 10);
+    await prisma.user.upsert({
+      where: { username: user.username },
+      update: { passwordHash, role: user.role, companyCode: user.companyCode },
+      create: {
+        username: user.username,
+        passwordHash,
+        role: user.role,
+        companyCode: user.companyCode,
+      },
+    });
+  }
 
   console.log('Seed complete.');
 }
