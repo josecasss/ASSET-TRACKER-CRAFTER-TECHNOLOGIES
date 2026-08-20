@@ -9,10 +9,12 @@ export interface CreateAssetInput {
   description: string;
   costCenter: string;
   statusId: string;
+  updatedByUser: string;
 }
 
-export async function getAssets() {
+export async function getAssets(companyCode: string) {
   return prisma.assetMaster.findMany({
+    where: { companyCode },
     include: {
       tracker: {
         include: {
@@ -23,7 +25,7 @@ export async function getAssets() {
   });
 }
 
-export async function getAssetByTag(assetTagNumber: string) {
+export async function getAssetByTag(assetTagNumber: string, companyCode: string) {
   const asset = await prisma.assetMaster.findUnique({
     where: { assetTagNumber: assetTagNumber },
     include: {
@@ -43,16 +45,19 @@ export async function getAssetByTag(assetTagNumber: string) {
     },
   });
 
-  if (!asset) {
+  if (!asset || asset.companyCode !== companyCode) {
     throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.');
   }
 
   return asset;
 }
 
-export async function getAssetHistory(assetTagNumber: string) {
+export async function getAssetHistory(assetTagNumber: string, companyCode: string) {
   const history = await prisma.assetStatusHistory.findMany({
-    where: { assetTagNumber },
+    where: {
+      assetTagNumber,
+      tracker: { companyCode },
+    },
     include: {
       statusCode: true,
     },
@@ -67,65 +72,72 @@ export async function createAsset(input: CreateAssetInput) {
     where: { statusId: input.statusId },
   });
 
-  if (!statusCode) {
+  if (!statusCode || !statusCode.active) {
     throw new ApiError(400, 'INVALID_STATUS', 'Status code does not exist.');
   }
 
   const assetTagNumber = input.assetTagNumber;
 
-  const asset = await prisma.assetMaster.upsert({
-    where: { assetTagNumber },
-    update: {
-      companyCode: input.companyCode,
-      mainAssetNumber: input.mainAssetNumber,
-      assetSubNumber: input.assetSubNumber,
-      description: input.description,
-      costCenter: input.costCenter,
-    },
-    create: {
-      assetTagNumber,
-      companyCode: input.companyCode,
-      mainAssetNumber: input.mainAssetNumber,
-      assetSubNumber: input.assetSubNumber,
-      description: input.description,
-      costCenter: input.costCenter,
-    },
-  });
+  return prisma.$transaction(async (transaction) => {
+    const existingAsset = await transaction.assetMaster.findUnique({ where: { assetTagNumber } });
+    if (existingAsset && existingAsset.companyCode !== input.companyCode) {
+      throw new ApiError(403, 'FORBIDDEN', 'Asset belongs to another company.');
+    }
 
-  const tracker = await prisma.assetStatusTracker.upsert({
-    where: { assetTagNumber },
-    update: {
-      companyCode: input.companyCode,
-      mainAssetNumber: input.mainAssetNumber,
-      assetSubNumber: input.assetSubNumber,
-      statusId: input.statusId,
-      lastCountedDate: new Date(),
-      updatedByUser: 'system',
-    },
-    create: {
-      assetTagNumber,
-      companyCode: input.companyCode,
-      mainAssetNumber: input.mainAssetNumber,
-      assetSubNumber: input.assetSubNumber,
-      statusId: input.statusId,
-      lastCountedDate: new Date(),
-      updatedByUser: 'system',
-    },
-  });
+    const asset = await transaction.assetMaster.upsert({
+      where: { assetTagNumber },
+      update: {
+        companyCode: input.companyCode,
+        mainAssetNumber: input.mainAssetNumber,
+        assetSubNumber: input.assetSubNumber,
+        description: input.description,
+        costCenter: input.costCenter,
+      },
+      create: {
+        assetTagNumber,
+        companyCode: input.companyCode,
+        mainAssetNumber: input.mainAssetNumber,
+        assetSubNumber: input.assetSubNumber,
+        description: input.description,
+        costCenter: input.costCenter,
+      },
+    });
 
-  await prisma.assetStatusHistory.create({
-    data: {
-      assetTagNumber,
-      statusId: input.statusId,
-      changedBy: 'system',
-    },
-  });
+    const tracker = await transaction.assetStatusTracker.upsert({
+      where: { assetTagNumber },
+      update: {
+        companyCode: input.companyCode,
+        mainAssetNumber: input.mainAssetNumber,
+        assetSubNumber: input.assetSubNumber,
+        statusId: input.statusId,
+        lastCountedDate: new Date(),
+        updatedByUser: input.updatedByUser,
+      },
+      create: {
+        assetTagNumber,
+        companyCode: input.companyCode,
+        mainAssetNumber: input.mainAssetNumber,
+        assetSubNumber: input.assetSubNumber,
+        statusId: input.statusId,
+        lastCountedDate: new Date(),
+        updatedByUser: input.updatedByUser,
+      },
+    });
 
-  return { asset, tracker };
+    await transaction.assetStatusHistory.create({
+      data: {
+        assetTagNumber,
+        statusId: input.statusId,
+        changedBy: input.updatedByUser,
+      },
+    });
+
+    return { asset, tracker };
+  });
 }
 
-export async function updateAssetStatus(assetTagNumber: string, statusId: string, changedBy: string) {
-  const asset = await prisma.assetMaster.findUnique({ where: { assetTagNumber } });
+export async function updateAssetStatus(assetTagNumber: string, statusId: string, changedBy: string, companyCode: string) {
+  const asset = await prisma.assetMaster.findFirst({ where: { assetTagNumber, companyCode } });
 
   if (!asset) {
     throw new ApiError(404, 'ASSET_NOT_FOUND', 'Asset not found.');
@@ -135,35 +147,37 @@ export async function updateAssetStatus(assetTagNumber: string, statusId: string
     where: { statusId },
   });
 
-  if (!statusCode) {
+  if (!statusCode || !statusCode.active) {
     throw new ApiError(400, 'INVALID_STATUS', 'Status code does not exist.');
   }
 
-  const tracker = await prisma.assetStatusTracker.upsert({
-    where: { assetTagNumber },
-    update: {
-      statusId,
-      lastCountedDate: new Date(),
-      updatedByUser: changedBy,
-    },
-    create: {
-      assetTagNumber,
-      companyCode: asset.companyCode,
-      mainAssetNumber: asset.mainAssetNumber,
-      assetSubNumber: asset.assetSubNumber,
-      statusId,
-      lastCountedDate: new Date(),
-      updatedByUser: changedBy,
-    },
-  });
+  return prisma.$transaction(async (transaction) => {
+    const tracker = await transaction.assetStatusTracker.upsert({
+      where: { assetTagNumber },
+      update: {
+        statusId,
+        lastCountedDate: new Date(),
+        updatedByUser: changedBy,
+      },
+      create: {
+        assetTagNumber,
+        companyCode: asset.companyCode,
+        mainAssetNumber: asset.mainAssetNumber,
+        assetSubNumber: asset.assetSubNumber,
+        statusId,
+        lastCountedDate: new Date(),
+        updatedByUser: changedBy,
+      },
+    });
 
-  await prisma.assetStatusHistory.create({
-    data: {
-      assetTagNumber,
-      statusId,
-      changedBy,
-    },
-  });
+    await transaction.assetStatusHistory.create({
+      data: {
+        assetTagNumber,
+        statusId,
+        changedBy,
+      },
+    });
 
-  return tracker;
+    return tracker;
+  });
 }
